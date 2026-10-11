@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#10141b">
+<title>Lockscreen Timer</title>
+<style>
+:root{color-scheme:dark;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}*{box-sizing:border-box}body{margin:0;min-height:100dvh;background:#10141b;color:#eef2f7;display:flex;align-items:center;justify-content:center;padding:24px}main{width:min(100%,430px)}h1{font-size:25px;letter-spacing:-.7px;margin:0 0 6px}.sub{color:#929baa;font-size:14px;line-height:1.5;margin:0 0 30px}.timer{text-align:center;font-variant-numeric:tabular-nums;font-size:clamp(65px,19vw,94px);font-weight:650;letter-spacing:-5px;margin:22px 0 4px}.state{text-align:center;color:#91a3bb;font-size:14px;min-height:24px;margin-bottom:30px}.panel{background:#1b222d;border:1px solid #2d3745;border-radius:20px;padding:20px;margin-bottom:15px}.heading{font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#9faabd;margin-bottom:14px}.inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:block;color:#b1bac8;font-size:13px}input{margin-top:7px;width:100%;height:51px;border-radius:12px;border:1px solid #414e60;background:#121922;color:white;font:600 23px system-ui;padding:0 13px;font-variant-numeric:tabular-nums}button{font:650 17px system-ui;border:0;border-radius:15px;min-height:56px;cursor:pointer}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin:20px 0}.primary{background:#a6cdfd;color:#102034}.secondary{background:#2a3544;color:#eaf1fa}.secondary:disabled,.primary:disabled{opacity:.45}.info{font-size:13px;line-height:1.55;color:#9aa7b7}.info strong{color:#d7e0eb}small{font-size:12px}#audio{display:none}.indicator{display:inline-block;width:8px;height:8px;border-radius:50%;background:#8292a7;margin-right:7px}.indicator.on{background:#69d79d}.error{color:#ffaaa8}.toggle{display:flex;align-items:center;gap:10px;margin-top:12px;color:#cad4df;font-size:13px}.toggle input{width:17px;height:17px;margin:0;accent-color:#a6cdfd}.foot{margin-top:26px;text-align:center;color:#697789;font-size:12px}
+</style>
+</head>
+<body><main>
+<h1>Timer</h1><p class="sub">A simple timer with a lock-screen audio alarm.</p>
+<div id="display" class="timer">05:00</div><div id="status" class="state"><span class="indicator"></span>Ready</div>
+<div class="panel"><div class="heading">Duration</div><div class="inputs"><label>Minutes<input id="minutes" type="number" inputmode="numeric" min="0" max="120" value="5"></label><label>Seconds<input id="seconds" type="number" inputmode="numeric" min="0" max="59" value="0"></label></div><label class="toggle"><input id="tick" type="checkbox" checked> Quiet tick each second (helps indicate playback)</label></div>
+<div class="buttons"><button id="start" class="primary">Start</button><button id="reset" class="secondary">Reset</button></div>
+<div class="info"><strong>For the best chance of hearing the alarm with your screen locked:</strong> Start the timer, confirm the ticking is audible, then lock your phone. Keep media volume up. You can turn off ticking, but silent playback may be less reliable on iOS.<p><strong>Important:</strong> This uses one continuous audio recording with the alarm built in. iOS can still stop background web audio, particularly in Home Screen web apps. Don't rely on it for critical alarms.</p></div>
+<audio id="audio" playsinline preload="auto"></audio>
+<div class="foot">No account · No internet needed after loading · Everything stays on your device</div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), audio=$('audio');
+let url=null, duration=300, target=0, interval=null, mode='ready', pausedLeft=0;
+const min=$('minutes'), sec=$('seconds');
+function fmt(n){n=Math.max(0,Math.ceil(n));return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`}
+function chosen(){return Math.min(7200,Math.max(1,(Number(min.value)||0)*60+(Number(sec.value)||0)))}
+function view(){const left= mode==='running'? Math.max(0,(target-Date.now())/1000):mode==='paused'?pausedLeft:mode==='done'?0:chosen();$('display').textContent=fmt(left);$('start').textContent=mode==='running'?'Pause':mode==='paused'?'Resume':'Start';$('status').innerHTML=`<span class="indicator ${mode==='running'?'on':''}"></span>${mode==='running'?'Running · lock screen enabled':mode==='paused'?'Paused':mode==='done'?'Finished':'Ready'}`;min.disabled=sec.disabled=(mode==='running'||mode==='paused');$('tick').disabled=(mode==='running'||mode==='paused');if(mode==='running' && Date.now()>=target){finish()}}
+function wav(secCount, ticks){
+ const rate=8000, length=Math.ceil((secCount+3)*rate), bytes=44+length*2;
+ const buffer=new ArrayBuffer(bytes), dv=new DataView(buffer);const ascii=(i,s)=>{for(let j=0;j<s.length;j++)dv.setUint8(i+j,s.charCodeAt(j))};
+ ascii(0,'RIFF');dv.setUint32(4,bytes-8,true);ascii(8,'WAVE');ascii(12,'fmt ');dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);dv.setUint32(24,rate,true);dv.setUint32(28,rate*2,true);dv.setUint16(32,2,true);dv.setUint16(34,16,true);ascii(36,'data');dv.setUint32(40,length*2,true);
+ for(let i=0;i<length;i++){
+  const t=i/rate;let v=.0005*Math.sin(t*2*Math.PI*180);
+  if(ticks&&t<secCount&&t%1<.026){const u=t%1;v+=.09*Math.sin(2*Math.PI*1050*u)*(1-u/.026)}
+  if(t>=secCount){const u=t-secCount;const on=(u<.5)||(u>=.7&&u<1.2)||(u>=1.4&&u<2.6);
+   if(on){const w=u<.5?u:u<1.2?u-.7:u-1.4;const end=u<.5?.5:u<1.2?.5:1.2;const envelope=Math.min(1,w/.018,(end-w)/.055);v+=.36*Math.max(0,envelope)*(Math.sin(2*Math.PI*880*w)+.45*Math.sin(2*Math.PI*1320*w));}
+  }
+  dv.setInt16(44+i*2,Math.max(-32767,Math.min(32767,Math.round(v*32767))),true);
+ }
+ return new Blob([buffer],{type:'audio/wav'});
+}
+function clear(){if(interval){clearInterval(interval);interval=null}audio.pause();audio.removeAttribute('src');audio.load();if(url){URL.revokeObjectURL(url);url=null}}
+function finish(){mode='done';if(interval){clearInterval(interval);interval=null}view();}
+function begin(left){clear();duration=left;try{url=URL.createObjectURL(wav(left,$('tick').checked));audio.src=url;audio.currentTime=0;audio.volume=1;target=Date.now()+left*1000;mode='running';view();const p=audio.play();if(p&&p.catch)p.catch(err=>{clear();mode='ready';view();$('status').innerHTML='<span class="error">Audio blocked. Tap Start again.</span>'});interval=setInterval(view,200)}catch(e){clear();mode='ready';view();$('status').innerHTML='<span class="error">Could not generate audio. Try a shorter duration.</span>';}}
+$('start').addEventListener('click',()=>{if(mode==='running'){pausedLeft=Math.max(0,(target-Date.now())/1000);audio.pause();clearInterval(interval);interval=null;mode='paused';view();return}if(mode==='paused'){target=Date.now()+pausedLeft*1000;mode='running';view();audio.play().catch(()=>{$('status').textContent='Tap Resume again to enable sound'});interval=setInterval(view,200);return}begin(chosen())});
+$('reset').addEventListener('click',()=>{clear();mode='ready';view()});
+for(const el of [min,sec])el.addEventListener('input',()=>{if(mode==='ready'||mode==='done'){mode='ready';view()}});
+audio.addEventListener('ended',()=>{if(mode==='running')finish()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)view()});
+if('mediaSession' in navigator){navigator.mediaSession.metadata=new MediaMetadata({title:'Timer',artist:'Lockscreen Timer',album:'Countdown'});navigator.mediaSession.setActionHandler('pause',()=>{if(mode==='running')$('start').click()});navigator.mediaSession.setActionHandler('play',()=>{if(mode==='paused')$('start').click()});}
+view();
+</script></main></body></html>
